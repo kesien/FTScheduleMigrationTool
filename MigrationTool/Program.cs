@@ -1,22 +1,13 @@
-﻿using System.Reflection;
-using System.Transactions;
-using Microsoft.EntityFrameworkCore;
+﻿using EntityRepository.Application.Helpers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MigrationTool.Options;
 
 namespace MigrationTool;
 internal class Program
 {
     private static async Task Main(string[] args)
-    {
-        var services = CreateServices();
-
-        Application app = services.GetRequiredService<Application>();
-        await app.Test();
-    }
-
-    private static ServiceProvider CreateServices()
     {
         var builder = new ConfigurationBuilder();
         BuildConfig(builder);
@@ -27,10 +18,11 @@ internal class Program
         var host = Host.CreateDefaultBuilder()
             .ConfigureServices((ctx, services) =>
             {
+                services.AddOptions<DbConnection>().Bind(config.GetSection("Database")).ValidateDataAnnotations();
                 services.AddSingleton<IContextFactory, ContextFactory>();
                 services.AddSingleton<IDataProviderSelector, DataProviderSelector>();
                 services.AddDbContext<ApplicationDbContext>(options =>
-                services.BuildServiceProvider().GetRequiredService<IDataProviderSelector>().UseSql(options));
+                    services.BuildServiceProvider().GetRequiredService<IDataProviderSelector>().UseSql(options));
                 services.AddScoped<ITransactionManager>(serviceProvider =>
                 {
                     ApplicationDbContext dbContext = serviceProvider.GetRequiredService<ApplicationDbContext>();
@@ -43,16 +35,8 @@ internal class Program
         var app = ActivatorUtilities.CreateInstance<Application>(host.Services);
 
         await app.Test();
-        var serviceProvider = new ServiceCollection()
-            .AddDbContext<ApplicationDbContext>(options =>
-            {
-                options.UseNpgsql(connectionString);
-            })
-            .AddSingleton<Application>(new Application())
-            .BuildServiceProvider();
-
-        return serviceProvider;
     }
+
 
     private static void BuildConfig(IConfigurationBuilder builder)
     {
