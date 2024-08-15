@@ -12,10 +12,10 @@ public class Application
     }
     public async Task Test()
     {
-        var schedules = await _context.WorkSchedules.ToListAsync();
-        foreach (var workScheduleEntity in schedules)
+        var users = await _context.Users.Include(u => u.Absences).Include(u => u.Requests).Include(u => u.WorkAssignments).ToListAsync();
+        foreach (var user in users)
         {
-            Console.WriteLine(workScheduleEntity.StartDate);
+            Console.WriteLine($"{user.Email}\tAbsences: {user.Absences.Count}\tRequests: {user.Requests.Count}\tWorkAssignments: {user.WorkAssignments.Count}");
         }
     }
 }
