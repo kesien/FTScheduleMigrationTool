@@ -13,7 +13,7 @@ public class ContextFactory : IContextFactory
 
     public DbContext GetContext()
     {
-        ApplicationDbContext ret = new(_dataProviderSelector);
+        OldApplicationDbContext ret = new(_dataProviderSelector);
         _ = ret.Database.EnsureCreated();
         return ret;
     }

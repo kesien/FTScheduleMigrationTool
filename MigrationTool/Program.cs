@@ -1,4 +1,5 @@
 ﻿using EntityRepository.Application.Helpers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,11 +22,15 @@ internal class Program
                 services.AddOptions<DbConnection>().Bind(config.GetSection("Database")).ValidateDataAnnotations();
                 services.AddSingleton<IContextFactory, ContextFactory>();
                 services.AddSingleton<IDataProviderSelector, DataProviderSelector>();
-                services.AddDbContext<ApplicationDbContext>(options =>
+                services.AddDbContext<OldApplicationDbContext>(options =>
                     services.BuildServiceProvider().GetRequiredService<IDataProviderSelector>().UseSql(options));
+                services.AddDbContext<NewApplicationDbContext>(opt =>
+                {
+                    opt.UseNpgsql(config.GetConnectionString("newContext"));
+                });
                 services.AddScoped<ITransactionManager>(serviceProvider =>
                 {
-                    ApplicationDbContext dbContext = serviceProvider.GetRequiredService<ApplicationDbContext>();
+                    OldApplicationDbContext dbContext = serviceProvider.GetRequiredService<OldApplicationDbContext>();
                     return new TransactionManager(dbContext);
                 });
                 services.AddSingleton<Application>();
@@ -34,7 +39,7 @@ internal class Program
 
         var app = ActivatorUtilities.CreateInstance<Application>(host.Services);
 
-        await app.Test();
+        await app.Migrate();
     }
 
 

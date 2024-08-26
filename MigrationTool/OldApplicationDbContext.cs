@@ -4,11 +4,11 @@ using MigrationTool.Persistency;
 
 namespace MigrationTool;
 
-public class ApplicationDbContext : IdentityDbContext<UserEntity, UserRoleEntity, Guid>
+public class OldApplicationDbContext : IdentityDbContext<UserEntity, UserRoleEntity, Guid>
 {
     private readonly IDataProviderSelector _dataProviderSelector;
 
-    public ApplicationDbContext(IDataProviderSelector dataProviderSelector)
+    public OldApplicationDbContext(IDataProviderSelector dataProviderSelector)
     {
         _dataProviderSelector = dataProviderSelector;
     }
