@@ -17,9 +17,24 @@ public class Application
     }
     public async Task Migrate()
     {
+        var departments = await _context.Departments.AsNoTracking().ToListAsync();
+        var todos = await _context.ToDos.AsNoTracking().ToListAsync();
+        var userRoles = await _context.UserRoles.AsNoTracking().ToListAsync();
+        var appLanguages = await _context.ApplicationLanguages.AsNoTracking().ToListAsync();
         var users = await _context.Users.Include(u => u.Absences).Include(u => u.Departments).Include(u => u.Requests).Include(u => u.WorkAssignments).ThenInclude(wa => wa.Todos).Include(u => u.Absences).ToListAsync();
         var seats = await _context.Seats.AsNoTracking().ToListAsync();
         var locations = await _context.Locations.Include(l => l.Seats).AsNoTracking().ToListAsync();
+
+        Console.ForegroundColor = ConsoleColor.Blue;
+        Console.WriteLine($"Migrating {departments.Count} departments");
+        await _newContext.AddRangeAsync(departments);
+        Console.WriteLine($"Migrating {todos.Count} todos");
+        await _newContext.AddRangeAsync(todos);
+        Console.WriteLine($"Migrating {userRoles.Count} user roles");
+        await _newContext.AddRangeAsync(userRoles);
+        Console.WriteLine($"Migrating {appLanguages.Count} app languages");
+        await _newContext.AddRangeAsync(appLanguages);
+
         foreach (var user in users)
         {
             Console.ForegroundColor = ConsoleColor.Blue;
