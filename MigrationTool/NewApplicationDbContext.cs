@@ -4,9 +4,9 @@ using MigrationTool.Persistency;
 
 namespace MigrationTool;
 
-public class NewApplicationDbContext : IdentityDbContext<UserEntity, UserRoleEntity, Guid>
+public class NewApplicationDbContext : IdentityDbContext<NewUserEntity, UserRoleEntity, Guid>
 {
-    public NewApplicationDbContext()
+    public NewApplicationDbContext(DbContextOptions options) : base(options)
     {
     }
 
@@ -19,16 +19,16 @@ public class NewApplicationDbContext : IdentityDbContext<UserEntity, UserRoleEnt
         builder.Entity<RecurrenceEntity>().HasKey(x => x.Id);
         builder.Entity<RecurrenceExceptionEntity>().HasKey(x => x.Id);
         builder.Entity<UserRoleEntity>().HasKey(x => x.Id);
-        builder.Entity<LocationEntity>().HasKey(x => x.Id);
-        builder.Entity<SeatEntity>().HasKey(x => x.Id);
-        builder.Entity<ToDoEntity>().HasKey(x => x.Id);
+        builder.Entity<NewLocationEntity>().HasKey(x => x.Id);
+        builder.Entity<NewSeatEntity>().HasKey(x => x.Id);
+        builder.Entity<NewToDoEntity>().HasKey(x => x.Id);
         builder.Entity<ApplicationLanguageEntity>().HasKey(x => x.Id);
-        builder.Entity<DepartmentEntity>().HasKey(x => x.Id);
+        builder.Entity<NewDepartmentEntity>().HasKey(x => x.Id);
 
         #region UserEntity
 
-        builder.Entity<NewUserEntity>().HasMany(u => u.Departments).WithMany(d => d.Users);
         builder.Entity<NewUserEntity>().HasOne(u => u.Calendar);
+        builder.Entity<NewUserEntity>().HasMany(u => u.Departments).WithMany(d => d.Users);
 
         #endregion
 
@@ -47,14 +47,14 @@ public class NewApplicationDbContext : IdentityDbContext<UserEntity, UserRoleEnt
 
         #region LocationEntity
 
-        builder.Entity<LocationEntity>().HasMany(l => l.Seats).WithOne(r => r.Location)
+        builder.Entity<NewLocationEntity>().HasMany(l => l.Seats).WithOne(r => r.Location)
             .HasForeignKey(l => l.LocationId);
 
         #endregion
 
         #region DepartmentEntity
 
-        builder.Entity<DepartmentEntity>().HasMany(d => d.Users).WithMany(u => u.Departments);
+        builder.Entity<NewDepartmentEntity>().HasMany(d => d.Users).WithMany(u => u.Departments);
 
         #endregion
 
@@ -66,9 +66,9 @@ public class NewApplicationDbContext : IdentityDbContext<UserEntity, UserRoleEnt
     public DbSet<RecurrenceEntity> Recurrences { get; set; }
     public DbSet<RecurrenceExceptionEntity> RecurrenceExceptions { get; set; }
     public DbSet<UserRoleEntity> Roles { get; set; }
-    public DbSet<LocationEntity> Locations { get; set; }
-    public DbSet<SeatEntity> Seats { get; set; }
-    public DbSet<ToDoEntity> ToDos { get; set; }
+    public DbSet<NewLocationEntity> Locations { get; set; }
+    public DbSet<NewSeatEntity> Seats { get; set; }
+    public DbSet<NewToDoEntity> ToDos { get; set; }
     public DbSet<ApplicationLanguageEntity> ApplicationLanguages { get; set; }
-    public DbSet<DepartmentEntity> Departments { get; set; }
+    public DbSet<NewDepartmentEntity> Departments { get; set; }
 }

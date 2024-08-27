@@ -10,6 +10,6 @@ namespace MigrationTool.Persistency
         public DateTime? RefreshTokenExpires { get; set; }
         public CalendarEntity Calendar { get; set; } = new();
         public Guid CalendarId { get; set; }
-        public ICollection<DepartmentEntity> Departments { get; set; } = new List<DepartmentEntity>();
+        public ICollection<NewDepartmentEntity> Departments { get; set; } = new List<NewDepartmentEntity>();
     }
 }
