@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using MigrationTool.Options;
 
 namespace MigrationTool;
@@ -27,6 +28,7 @@ internal class Program
                 services.AddDbContext<NewApplicationDbContext>(opt =>
                 {
                     opt.UseNpgsql(config.GetConnectionString("newContext"));
+                    opt.LogTo(message => { }, LogLevel.None);
                 });
                 services.AddScoped<ITransactionManager>(serviceProvider =>
                 {

@@ -1,11 +1,8 @@
-﻿using System.Text.Json;
-using MediatR;
-using Microsoft.AspNetCore.Mvc.Rendering;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using MigrationTool.Constants;
 using MigrationTool.Persistency;
-using NodaTime;
 using Npgsql;
+using System.Text.Json;
 
 namespace MigrationTool;
 
@@ -25,30 +22,13 @@ public class Application
     {
         await _newContext.Database.EnsureDeletedAsync();
         await _newContext.Database.EnsureCreatedAsync();
-        var migrations = _context.Database.SqlQueryRaw<Migration>("SELECT * FROM public.\"__EFMigrationsHistory\"").ToList();
 
-        await _newContext.Database.ExecuteSqlRawAsync(@"
-        CREATE TABLE ""__EFMigrationsHistory"" (
-            ""MigrationId"" varchar(150), 
-            ""ProductVersion"" varchar(32)
-        );");
-        foreach (var migration in migrations)
-        {
-            await _newContext.Database.ExecuteSqlRawAsync(@"
-        INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"") 
-        VALUES (@MigrationId, @ProductVersion)",
-        new[] {
-            new NpgsqlParameter("MigrationId", migration.MigrationId),
-            new NpgsqlParameter("ProductVersion", migration.ProductVersion)
-        });
-        }
-
+        // Egyszerű entitások migrálása (változatlan)
         var departments = await _context.Departments.AsNoTracking().ToListAsync();
         var todos = await _context.ToDos.AsNoTracking().ToListAsync();
         var userRoles = await _context.UserRoles.AsNoTracking().ToListAsync();
         var roles = await _context.Roles.AsNoTracking().ToListAsync();
         var appLanguages = await _context.ApplicationLanguages.AsNoTracking().ToListAsync();
-        var users = await _context.Users.Include(u => u.Absences).Include(u => u.Departments).Include(u => u.Requests).Include(u => u.Requests).Include(u => u.WorkAssignments).ThenInclude(wa => wa.Todos).Include(u => u.Absences).AsNoTracking().ToListAsync();
         var seats = await _context.Seats.AsNoTracking().ToListAsync();
         var locations = await _context.Locations.Include(l => l.Seats).AsNoTracking().ToListAsync();
 
@@ -56,6 +36,32 @@ public class Application
         var newDepartments = departments.Select(d => new NewDepartmentEntity { Id = d.Id, Name = d.Name }).ToList();
         var newTodos = todos.Select(t => new NewToDoEntity { Id = t.Id, Name = t.Name, Description = t.Description }).ToList();
         var newLocations = locations.Select(l => new NewLocationEntity { Address = l.Address, Id = l.Id, Name = l.Name, Seats = newSeats.Where(newSeat => l.Seats.Select(seat => seat.Id).Any(seatId => seatId == newSeat.Id)).ToList() }).ToList();
+
+        // Migration history kezelése
+        var migrations = _context.Database.SqlQueryRaw<Migration>("SELECT * FROM public.\"__EFMigrationsHistory\"").ToList();
+
+        await _newContext.Database.ExecuteSqlRawAsync(@"
+    CREATE TABLE ""__EFMigrationsHistory"" (
+        ""MigrationId"" varchar(150), 
+        ""ProductVersion"" varchar(32)
+    );");
+        migrations.Add(new Migration("20240807071618_CalendarAdded", "7.0.10"));
+        migrations.Add(new Migration("20240808185311_EventTypeAdded", "7.0.10"));
+        migrations.Add(new Migration("20240810185254_PhoneNumberAddedToEvent", "7.0.10"));
+        migrations.Add(new Migration("20240813102839_DateAddedToEventEntity", "7.0.10"));
+        migrations.Add(new Migration("20240814071640_UidAddedToEventEntity", "7.0.10"));
+        migrations.Add(new Migration("20240814115358_RecurrenceIdAddedToEventEntity", "7.0.10"));
+
+        foreach (var migration in migrations)
+        {
+            await _newContext.Database.ExecuteSqlRawAsync(@"
+    INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"") 
+    VALUES (@MigrationId, @ProductVersion)",
+        new[] {
+        new NpgsqlParameter("MigrationId", migration.MigrationId),
+        new NpgsqlParameter("ProductVersion", migration.ProductVersion)
+        });
+        }
 
         Console.ForegroundColor = ConsoleColor.Blue;
         Console.WriteLine($"Migrating {newLocations.Count} locations");
@@ -74,46 +80,104 @@ public class Application
         await _newContext.ApplicationLanguages.AddRangeAsync(appLanguages);
         await _newContext.SaveChangesAsync();
 
-        var newUsers = new List<NewUserEntity>();
-        foreach (var user in users)
-        {
-            Console.ForegroundColor = ConsoleColor.Blue;
-            Console.WriteLine($"Migrating {user.Email} with {user.WorkAssignments.Count} work assignments and {user.Absences.Count} absences");
-            var newUserEntity = new NewUserEntity
-            {
-                AccessFailedCount = user.AccessFailedCount,
-                ConcurrencyStamp = user.ConcurrencyStamp,
-                Departments = newDepartments.Where(newD => user.Departments.Select(d => d.Id).Any(x => x == newD.Id)).ToList(),
-                Email = user.Email,
-                EmailConfirmed = user.EmailConfirmed,
-                FirstName = user.FirstName,
-                Id = user.Id,
-                LastName = user.LastName,
-                LockoutEnabled = user.LockoutEnabled,
-                LockoutEnd = user.LockoutEnd,
-                NormalizedEmail = user.NormalizedEmail,
-                NormalizedUserName = user.NormalizedUserName,
-                PasswordHash = user.PasswordHash,
-                PhoneNumber = user.PhoneNumber,
-                PhoneNumberConfirmed = user.PhoneNumberConfirmed,
-                RefreshToken = user.RefreshToken,
-                RefreshTokenExpires = null,
-                SecurityStamp = user.SecurityStamp,
-                TwoFactorEnabled = user.TwoFactorEnabled,
-                UserName = user.UserName,
-            };
+        // USERS MIGRÁLÁSA CHUNK-OKBAN
+        const int batchSize = 100; // Állítsd be a rendszered kapacitása szerint
+        var totalUsers = await _context.Users.CountAsync();
+        Console.WriteLine($"Total users to migrate: {totalUsers}");
 
-            newUsers.Add(newUserEntity);
+        for (int skip = 0; skip < totalUsers; skip += batchSize)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"Processing users batch {skip / batchSize + 1} ({skip + 1}-{Math.Min(skip + batchSize, totalUsers)} of {totalUsers})");
+
+            // Felhasználók betöltése chunk-okban
+            var usersBatch = await _context.Users
+                .Include(u => u.Departments)
+                .Skip(skip)
+                .Take(batchSize)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var newUsersBatch = new List<NewUserEntity>();
+
+            foreach (var user in usersBatch)
+            {
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine($"Migrating user: {user.Email}");
+
+                var newUserEntity = new NewUserEntity
+                {
+                    AccessFailedCount = user.AccessFailedCount,
+                    ConcurrencyStamp = user.ConcurrencyStamp,
+                    Departments = newDepartments.Where(newD => user.Departments.Select(d => d.Id).Any(x => x == newD.Id)).ToList(),
+                    Email = user.Email,
+                    EmailConfirmed = user.EmailConfirmed,
+                    FirstName = user.FirstName,
+                    Id = user.Id,
+                    LastName = user.LastName,
+                    LockoutEnabled = user.LockoutEnabled,
+                    LockoutEnd = user.LockoutEnd,
+                    NormalizedEmail = user.NormalizedEmail,
+                    NormalizedUserName = user.NormalizedUserName,
+                    PasswordHash = user.PasswordHash,
+                    PhoneNumber = user.PhoneNumber,
+                    PhoneNumberConfirmed = user.PhoneNumberConfirmed,
+                    RefreshToken = user.RefreshToken,
+                    RefreshTokenExpires = null,
+                    SecurityStamp = user.SecurityStamp,
+                    TwoFactorEnabled = user.TwoFactorEnabled,
+                    UserName = user.UserName,
+                };
+
+                newUsersBatch.Add(newUserEntity);
+            }
+
+            // Felhasználók mentése
+            await _newContext.Users.AddRangeAsync(newUsersBatch);
+            await _newContext.SaveChangesAsync();
+
+            // Most dolgozzuk fel a kapcsolódó adatokat külön lekérdezésekkel
+            await ProcessUserRelatedData(usersBatch.Select(u => u.Id).ToList(), newSeats, newLocations, newTodos);
+
+            // Memória felszabadítása
+            _newContext.ChangeTracker.Clear();
+            GC.Collect();
         }
 
-        await _newContext.Users.AddRangeAsync(newUsers);
+        // UserRoles migrálása
+        Console.WriteLine($"Migrating {userRoles.Count} user roles");
+        await _newContext.AddRangeAsync(userRoles);
         await _newContext.SaveChangesAsync();
+        await _newContext.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""NewDepartmentEntityNewUserEntity"" RENAME TO ""DepartmentEntityUserEntity"";");
+    }
 
-        foreach (var user in users)
+    private async Task ProcessUserRelatedData(List<Guid> userIds, List<NewSeatEntity> newSeats, List<NewLocationEntity> newLocations, List<NewToDoEntity> newTodos)
+    {
+        foreach (var userId in userIds)
         {
-            var newUser = newUsers.FirstOrDefault(u => u.Id == user.Id);
+            Console.WriteLine($"Processing related data for user: {userId}");
 
-            foreach (var request in user.Requests)
+            // Külön lekérdezések a kapcsolódó adatokhoz
+            var userRequests = await _context.Requests
+                .Where(r => r.UserId == userId)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var userWorkAssignments = await _context.WorkAssignments
+                .Include(wa => wa.Todos)
+                .Where(wa => wa.UserId == userId)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var userAbsences = await _context.Absences
+                .Where(a => a.UserId == userId)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var newUser = await _newContext.Users.FirstAsync(u => u.Id == userId);
+
+            // Requests feldolgozása
+            foreach (var request in userRequests)
             {
                 var seatEntity = newSeats.FirstOrDefault(s => s.Id == request.SeatId);
                 var locationEntity = newLocations.FirstOrDefault(l => l.Seats.Any(s => s.Id == request.SeatId));
@@ -121,7 +185,7 @@ public class Application
                 var eventEntity = new EventEntity
                 {
                     Date = DateTime.SpecifyKind(request.StartTime.Date, DateTimeKind.Utc),
-                    DtStart = DateTime.SpecifyKind(request.StartTime.AddHours(-2), DateTimeKind.Utc),//request.StartTime.ToUniversalTime(),
+                    DtStart = DateTime.SpecifyKind(request.StartTime.AddHours(-2), DateTimeKind.Utc),
                     DtEnd = DateTime.SpecifyKind(request.EndTime.AddHours(-2), DateTimeKind.Utc),
                     Description = "",
                     EventType = EventType.Event,
@@ -136,6 +200,7 @@ public class Application
                     RecurrenceId = null,
                     TimezoneId = "UTC"
                 };
+
                 if (request.IsFix)
                 {
                     RecurrenceEntity recurrenceEntity = new()
@@ -156,14 +221,27 @@ public class Application
                     recurrenceEntity.RecurrencePattern = recurrenceEntity.GetRecurrencePattern();
                     eventEntity.Recurrences.Add(recurrenceEntity);
                 }
-                newUser?.Calendar.Events.Add(eventEntity);
+                newUser.Calendar.Events.Add(eventEntity);
             }
 
-            foreach (var wa in user.WorkAssignments)
+            // WorkAssignments feldolgozása
+            var processedEvents = new HashSet<string>(); // Key: "Date-SeatId-StartTime-EndTime"
+            foreach (var wa in userWorkAssignments)
             {
-                if (wa.IsRequest) continue;
                 var seatEntity = newSeats.FirstOrDefault(s => s.Id == wa.SeatId);
                 var locationEntity = newLocations.FirstOrDefault(l => l.Seats.Any(s => s.Id == wa.SeatId));
+
+                // Deduplikációs kulcs
+                var eventKey = $"{wa.StartDate.Date:yyyy-MM-dd}-{wa.SeatId}-{wa.StartDate.TimeOfDay}-{wa.EndDate.TimeOfDay}";
+
+                if (processedEvents.Contains(eventKey))
+                {
+                    Console.WriteLine($"Skipping duplicate WorkAssignment: {eventKey}");
+                    continue; // Skip duplicate
+                }
+
+                processedEvents.Add(eventKey);
+
                 var eventEntity = new EventEntity
                 {
                     Date = DateTime.SpecifyKind(wa.StartDate.Date, DateTimeKind.Utc),
@@ -185,16 +263,39 @@ public class Application
                     RecurrenceId = null,
                     TimezoneId = "UTC"
                 };
-                newUser?.Calendar.Events.Add(eventEntity);
-            };
 
-            foreach (var absence in user.Absences)
+
+                // HA ez egy IsRequest WorkAssignment, akkor keress recurring event-et ugyanarra a DayOfWeek-re és SeatId-re
+                if (wa.IsRequest)
+                {
+                    // Keress recurring event-et ugyanarra a napra (DayOfWeek) és ugyanarra a seat-re
+                    var recurringEventForSameDay = newUser.Calendar.Events.FirstOrDefault(e =>
+                        e.Recurrences.Any() &&
+                        e.Date.HasValue &&
+                        e.Date.Value.DayOfWeek == wa.StartDate.Date.DayOfWeek &&
+                        e.SeatId == wa.SeatId);
+
+                    if (recurringEventForSameDay is not null)
+                    {
+                        Console.WriteLine($"Adding exception for WorkAssignment on {wa.StartDate.Date} (SeatId: {wa.SeatId}) to recurring event on {recurringEventForSameDay.Date.Value.DayOfWeek}");
+                        recurringEventForSameDay.Exceptions.Add(new RecurrenceExceptionEntity
+                        {
+                            Date = DateTime.SpecifyKind(wa.StartDate.Date, DateTimeKind.Utc),
+                            Event = recurringEventForSameDay
+                        });
+                    }
+                }
+
+                newUser.Calendar.Events.Add(eventEntity);
+            }
+
+            // Absences feldolgozása
+            foreach (var absence in userAbsences)
             {
                 var curDate = absence.StartDate;
                 while (curDate <= absence.EndDate)
                 {
-
-                    var eventForSameDay = newUser?.Calendar.Events.FirstOrDefault(e => e.Recurrences.Count > 0 && e.Date.Value.DayOfWeek == curDate.Date.DayOfWeek);
+                    var eventForSameDay = newUser.Calendar.Events.FirstOrDefault(e => e.Recurrences.Count > 0 && e.Date.Value.DayOfWeek == curDate.Date.DayOfWeek);
                     if (eventForSameDay is not null)
                     {
                         var exception = new RecurrenceExceptionEntity
@@ -203,10 +304,10 @@ public class Application
                             Event = eventForSameDay
                         };
                         eventForSameDay.Exceptions.Add(exception);
-
                     }
                     curDate = curDate.AddDays(1);
                 }
+
                 var eventEntity = new EventEntity
                 {
                     Date = DateTime.SpecifyKind(absence.StartDate.Date, DateTimeKind.Utc),
@@ -248,15 +349,11 @@ public class Application
                     eventEntity.Recurrences.Add(recurrenceEntity);
                 }
 
-                newUser?.Calendar.Events.Add(eventEntity);
+                newUser.Calendar.Events.Add(eventEntity);
             }
-        }
-        await _newContext.SaveChangesAsync();
 
-        Console.WriteLine($"Migrating {userRoles.Count} user roles");
-        await _newContext.AddRangeAsync(userRoles);
-        await _newContext.SaveChangesAsync();
-        await _newContext.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""NewDepartmentEntityNewUserEntity"" RENAME TO ""DepartmentEntityUserEntity"";");
+            await _newContext.SaveChangesAsync();
+        }
     }
 
     private EventType GetEventType(AbsenceType type) => type switch

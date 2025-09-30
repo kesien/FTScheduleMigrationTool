@@ -23,4 +23,7 @@ public class EventEntity
     public CalendarEntity Calendar { get; set; }
     public Guid SeatId { get; set; }
     public string? PhoneNumber { get; set; }
+    public string? LastModifiedBy { get; set; }
+    public DateTimeOffset Created { get; init; } = DateTime.UtcNow;
+    public DateTimeOffset LastUpdated { get; set; } = DateTime.UtcNow;
 }
